@@ -1,7 +1,6 @@
 package conntrack_test
 
 import (
-	"conntrack"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +9,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/peterbourgon/conntrack"
 )
 
 func TestDialer(t *testing.T) {
