@@ -40,15 +40,18 @@ res, err := client.Get("http://zombo.com")
 // ...
 ```
 
-The tracker.Connections method returns metadata for all active connections.
+The tracker maintains metadata for all active connections.
 
 ```go
 infos := tracker.Connections()
 for i, info := range infos {
-	fmt.Printf("%d/%d: %+v\n", i+1, len(infos), info)
+	fmt.Printf("%d/%d\n", i+1, len(infos))
+	fmt.Printf(" Category:       %s\n", info.Category)
+	fmt.Printf(" ClientServer:   %s\n", info.ClientServer)
+	fmt.Printf(" LocalAddr:      %s\n", info.LocalAddr)
+	fmt.Printf(" RemoteAddr:     %s\n", info.RemoteAddr)
+	fmt.Printf(" EstablishedFor: %s\n", info.EstablishedFor)
+	fmt.Printf(" ReadBytes:      %d\n", info.ReadBytes)
+	fmt.Printf(" WriteBytes:     %d\n", info.WriteBytes)
 }
-
-// Output:
-// 1/2: {Category:cat1 ClientServer:client LocalAddr:... RemoteAddr:... EstablishedFor:149ms ReadBytes:129 WriteBytes:96}
-// 2/2: {Category:cat2 ClientServer:server LocalAddr:... RemoteAddr:... EstablishedFor:32.1s ReadBytes:125 WriteBytes:32}
 ```
