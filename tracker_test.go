@@ -177,6 +177,43 @@ func TestListener(t *testing.T) {
 	}
 }
 
+func TestSummary(t *testing.T) {
+	t.Parallel()
+
+	tracker := conntrack.NewTracker()
+	trackingDialer := tracker.NewDialer(&net.Dialer{}, conntrack.DialerConfig{})
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: trackingDialer.DialContext,
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "hello world")
+	}))
+	t.Cleanup(server.Close)
+
+	req1, _ := http.NewRequest("GET", server.URL, nil)
+	res1, _ := client.Do(req1)
+	defer func() { io.Copy(io.Discard, res1.Body); res1.Body.Close() }()
+
+	req2, _ := http.NewRequest("GET", server.URL, nil)
+	res2, _ := client.Do(req2)
+	defer func() { io.Copy(io.Discard, res2.Body); res2.Body.Close() }()
+
+	summary := conntrack.Summarize(tracker.Connections())
+	if want, have := 2, summary.Count; want != have {
+		t.Errorf("summary.Count: want %d, have %d", want, have)
+	}
+	if want, have := uint64(258), summary.ReadBytes; want != have {
+		t.Errorf("summary.ReadBytes: want %d, have %d", want, have)
+	}
+	if want, have := uint64(192), summary.WriteBytes; want != have {
+		t.Errorf("summary.WriteBytes: want %d, have %d", want, have)
+	}
+}
+
 func recvTimeout[T any](tb testing.TB, c <-chan T, timeout time.Duration) T {
 	tb.Helper()
 	select {
