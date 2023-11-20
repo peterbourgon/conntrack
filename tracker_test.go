@@ -20,10 +20,10 @@ func TestDialer(t *testing.T) {
 	events := make(chan string, 100)
 	trackingDialer := tracker.NewDialer(&net.Dialer{}, conntrack.DialerConfig{
 		OnDial: func(netw, addr string, c net.Conn, err error) {
-			events <- fmt.Sprintf("OnDial %s %s (%s) -> %v", netw, addr, c.RemoteAddr(), err)
+			events <- fmt.Sprintf("OnDial %s %s (%s) -> %v", netw, addr, conntrack.SafeRemoteAddr(c), err)
 		},
 		OnClose: func(c net.Conn, err error) {
-			events <- fmt.Sprintf("OnClose (%s) -> %v", c.RemoteAddr(), err)
+			events <- fmt.Sprintf("OnClose (%s) -> %v", conntrack.SafeRemoteAddr(c), err)
 		},
 	})
 
@@ -175,43 +175,6 @@ func TestListener(t *testing.T) {
 	}
 	if want, have := 0, len(tracker.Connections()); want != have {
 		t.Errorf("tracker.Connections: want %d, have %d", want, have)
-	}
-}
-
-func TestSummary(t *testing.T) {
-	t.Parallel()
-
-	tracker := conntrack.NewTracker()
-	trackingDialer := tracker.NewDialer(&net.Dialer{}, conntrack.DialerConfig{})
-
-	client := &http.Client{
-		Transport: &http.Transport{
-			DialContext: trackingDialer.DialContext,
-		},
-	}
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "hello world")
-	}))
-	t.Cleanup(server.Close)
-
-	req1, _ := http.NewRequest("GET", server.URL, nil)
-	res1, _ := client.Do(req1)
-	defer func() { io.Copy(io.Discard, res1.Body); res1.Body.Close() }()
-
-	req2, _ := http.NewRequest("GET", server.URL, nil)
-	res2, _ := client.Do(req2)
-	defer func() { io.Copy(io.Discard, res2.Body); res2.Body.Close() }()
-
-	summary := conntrack.Summarize(tracker.Connections())
-	if want, have := 2, summary.Count; want != have {
-		t.Errorf("summary.Count: want %d, have %d", want, have)
-	}
-	if want, have := uint64(258), summary.ReadBytes; want != have {
-		t.Errorf("summary.ReadBytes: want %d, have %d", want, have)
-	}
-	if want, have := uint64(192), summary.WriteBytes; want != have {
-		t.Errorf("summary.WriteBytes: want %d, have %d", want, have)
 	}
 }
 

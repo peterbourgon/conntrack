@@ -93,46 +93,6 @@ type ConnInfo struct {
 	WriteBytes uint64
 }
 
-// Summarize returns a ConnSummary representing the provided ConnInfos.
-func Summarize(cis []ConnInfo) ConnSummary {
-	var cs ConnSummary
-	for _, ci := range cis {
-		cs.Add(ci)
-	}
-	return cs
-}
-
-// ConnSummary represents summary metadata for multiple ConnInfos.
-type ConnSummary struct {
-	// Count is how many connections are represented by the summary.
-	Count int
-
-	// Shortest connection established time.
-	Shortest time.Duration
-
-	// Longest connection established time.
-	Longest time.Duration
-
-	// ReadBytes is the total bytes read from all connections.
-	ReadBytes uint64
-
-	// WriteBytes is the total bytes written to all connections.
-	WriteBytes uint64
-}
-
-// Add the connection info to the summary.
-func (cs *ConnSummary) Add(ci ConnInfo) {
-	cs.Count++
-	if cs.Shortest == 0 || ci.EstablishedFor < cs.Shortest {
-		cs.Shortest = ci.EstablishedFor
-	}
-	if cs.Longest == 0 || ci.EstablishedFor > cs.Longest {
-		cs.Longest = ci.EstablishedFor
-	}
-	cs.ReadBytes += ci.ReadBytes
-	cs.WriteBytes += ci.WriteBytes
-}
-
 //
 //
 //
