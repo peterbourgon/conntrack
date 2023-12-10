@@ -1,11 +1,16 @@
 # conntrack [![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/peterbourgon/conntrack) [![Latest Release](https://img.shields.io/github/v/release/peterbourgon/conntrack?style=flat-square)](https://github.com/peterbourgon/conntrack/releases/latest) ![Build Status](https://github.com/peterbourgon/conntrack/actions/workflows/test.yaml/badge.svg?branch=main)
 
-Package conntrack allows Go programs to track incoming and outgoing connections.
+Package conntrack allows Go programs to keep track of active connections.
+
+First, create a conntrack.Tracker.
+
+```go
+tracker := conntrack.NewTracker()
+```
 
 To track incoming connections to a server, create and wrap a net.Listener.
 
 ```go
-tracker := conntrack.NewTracker()
 baseListener, err := net.Listen("tcp", "127.0.0.1:8080")
 // handle err
 trackingListener := tracker.Listener(baseListener, conntrack.ListenerConfig{
@@ -22,7 +27,6 @@ server.Serve(trackingListener)
 To track outgoing connections from a client, create and wrap a net.Dialer.
 
 ```go
-tracker := conntrack.NewTracker()
 baseDialer := &net.Dialer{...}
 trackingDialer := tracker.Dialer(baseDialer, conntrack.DialerConfig{
 	Category: "optional-category",
@@ -40,7 +44,7 @@ res, err := client.Get("http://zombo.com")
 // ...
 ```
 
-The tracker maintains metadata for all active connections.
+The conntrack.Tracker maintains metadata for each active connection.
 
 ```go
 infos := tracker.Connections()
