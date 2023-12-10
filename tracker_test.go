@@ -201,12 +201,12 @@ func BenchmarkTrackingOverhead(b *testing.B) {
 			packet := bytes.Repeat([]byte{'a'}, int(sz))
 
 			b.Run("nothing", func(b *testing.B) {
-				pl := newNetpipe()
-				ln := net.Listener(pl)
+				np := newNetpipe()
+				ln := net.Listener(np)
 				errc := make(chan error, 1)
 				go func() { errc <- drain(ln) }()
-				b.Cleanup(func() { pl.Close(); <-errc })
-				dl := pl
+				b.Cleanup(func() { np.Close(); <-errc })
+				dl := np
 				cc, _ := dl.DialContext(ctx, "", "")
 				b.Cleanup(func() { cc.Close() })
 				b.ResetTimer()
@@ -217,13 +217,13 @@ func BenchmarkTrackingOverhead(b *testing.B) {
 			})
 
 			b.Run("listener", func(b *testing.B) {
-				pl := newNetpipe()
+				np := newNetpipe()
 				tr := conntrack.NewTracker()
-				ln := tr.NewListener(net.Listener(pl), conntrack.ListenerConfig{})
+				ln := tr.NewListener(net.Listener(np), conntrack.ListenerConfig{})
 				errc := make(chan error, 1)
 				go func() { errc <- drain(ln) }()
-				b.Cleanup(func() { pl.Close(); <-errc })
-				dl := pl
+				b.Cleanup(func() { np.Close(); <-errc })
+				dl := np
 				cc, _ := dl.DialContext(ctx, "", "")
 				b.Cleanup(func() { cc.Close() })
 				b.ResetTimer()
@@ -234,13 +234,13 @@ func BenchmarkTrackingOverhead(b *testing.B) {
 			})
 
 			b.Run("dialer", func(b *testing.B) {
-				pl := newNetpipe()
+				np := newNetpipe()
 				tr := conntrack.NewTracker()
-				ln := net.Listener(pl)
+				ln := net.Listener(np)
 				errc := make(chan error, 1)
 				go func() { errc <- drain(ln) }()
-				b.Cleanup(func() { pl.Close(); <-errc })
-				dl := tr.NewDialContextFunc(pl.DialContext, conntrack.DialerConfig{})
+				b.Cleanup(func() { np.Close(); <-errc })
+				dl := tr.NewDialContextFunc(np.DialContext, conntrack.DialerConfig{})
 				cc, _ := dl.DialContext(ctx, "", "")
 				b.Cleanup(func() { cc.Close() })
 				b.ResetTimer()
@@ -251,13 +251,13 @@ func BenchmarkTrackingOverhead(b *testing.B) {
 			})
 
 			b.Run("both", func(b *testing.B) {
-				pl := newNetpipe()
+				np := newNetpipe()
 				tr := conntrack.NewTracker()
-				ln := tr.NewListener(net.Listener(pl), conntrack.ListenerConfig{})
+				ln := tr.NewListener(net.Listener(np), conntrack.ListenerConfig{})
 				errc := make(chan error, 1)
 				go func() { errc <- drain(ln) }()
-				b.Cleanup(func() { pl.Close(); <-errc })
-				dl := tr.NewDialContextFunc(pl.DialContext, conntrack.DialerConfig{})
+				b.Cleanup(func() { np.Close(); <-errc })
+				dl := tr.NewDialContextFunc(np.DialContext, conntrack.DialerConfig{})
 				cc, _ := dl.DialContext(ctx, "", "")
 				b.Cleanup(func() { cc.Close() })
 				b.ResetTimer()
@@ -301,26 +301,26 @@ func newNetpipe() *netpipe {
 	return &netpipe{server, client}
 }
 
-func (pl *netpipe) Accept() (net.Conn, error) {
-	return pl.server, nil
+func (np *netpipe) Accept() (net.Conn, error) {
+	return np.server, nil
 }
 
-func (pl *netpipe) Close() error {
-	return errors.Join(pl.client.Close(), pl.server.Close())
+func (np *netpipe) Close() error {
+	return errors.Join(np.client.Close(), np.server.Close())
 }
 
-func (pl *netpipe) Network() string {
+func (np *netpipe) Network() string {
 	return "netpipe"
 }
 
-func (pl *netpipe) String() string {
+func (np *netpipe) String() string {
 	return "netpipe"
 }
 
-func (pl *netpipe) Addr() net.Addr {
-	return pl
+func (np *netpipe) Addr() net.Addr {
+	return np
 }
 
-func (pl *netpipe) DialContext(context.Context, string, string) (net.Conn, error) {
-	return pl.client, nil
+func (np *netpipe) DialContext(context.Context, string, string) (net.Conn, error) {
+	return np.client, nil
 }
