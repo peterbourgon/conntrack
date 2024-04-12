@@ -13,7 +13,7 @@ To track incoming connections to a server, create and wrap a net.Listener.
 ```go
 baseListener, err := net.Listen("tcp", "127.0.0.1:8080")
 // handle err
-trackingListener := tracker.Listener(baseListener, conntrack.ListenerConfig{
+trackingListener := tracker.NewListener(baseListener, conntrack.ListenerConfig{
 	Category: "optional-category",
 	OnAccept: func(c net.Conn, err error) { /* optional callback */ },
 	OnRead:   func(n int, err error)      { /* optional callback */ },
@@ -28,7 +28,7 @@ To track outgoing connections from a client, create and wrap a net.Dialer.
 
 ```go
 baseDialer := &net.Dialer{...}
-trackingDialer := tracker.Dialer(baseDialer, conntrack.DialerConfig{
+trackingDialer := tracker.NewDialer(baseDialer, conntrack.DialerConfig{
 	Category: "optional-category",
 	OnDial:   func(netw, addr string, c net.Conn, err error) { /* optional callback */ },
 	OnRead:   func(n int, err error)                         { /* optional callback */ },
