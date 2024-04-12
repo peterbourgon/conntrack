@@ -38,7 +38,7 @@ trackingDialer := tracker.Dialer(baseDialer, conntrack.DialerConfig{
 client := &http.Client{
 	Transport: &http.Transport{
 		DialContext: trackingDialer.DialContext,
-	}
+	},
 }
 res, err := client.Get("http://zombo.com")
 // ...
