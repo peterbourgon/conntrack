@@ -10,7 +10,7 @@ import (
 type Dialer struct {
 	dialFunc DialContextFunc
 	tracker  *Tracker
-	onDial   func(string, string, net.Conn, error)
+	onDial   func(context.Context, string, string, net.Conn, error)
 	config   connConfig
 }
 
@@ -30,12 +30,12 @@ func newDialer(f DialContextFunc, t *Tracker, c DialerConfig) *Dialer {
 // DialContext decorates the net.Dialer method for tracking purposes.
 func (d *Dialer) DialContext(ctx context.Context, network, address string) (conn net.Conn, err error) {
 	defer func(begin time.Time) {
-		d.onDial(network, address, conn, err)
+		d.onDial(ctx, network, address, conn, err)
 	}(time.Now())
 
 	conn, err = d.dialFunc(ctx, network, address)
 	if err == nil && conn != nil {
-		conn = d.tracker.newConn(conn, d.config, "client")
+		conn = d.tracker.newConn(ctx, conn, d.config, "client")
 	}
 
 	return conn, err
@@ -49,38 +49,38 @@ type DialerConfig struct {
 
 	// OnDial is an optional callback that, if non-nil, will be called at the
 	// end of every dial operation made by the dialer.
-	OnDial func(netw string, addr string, c net.Conn, err error)
+	OnDial func(ctx context.Context, netw string, addr string, c net.Conn, err error)
 
 	// OnRead is an optional callback that, if non-nil, will be called at the
 	// end of every read operation made on any connection created from the
 	// dialer.
-	OnRead func(n int, err error)
+	OnRead func(ctx context.Context, n int, err error)
 
 	// OnWrite is an optional callback that, if non-nil, will be called at the
 	// end of every write operation made on any connection created from the
 	// dialer.
-	OnWrite func(n int, err error)
+	OnWrite func(ctx context.Context, n int, err error)
 
 	// OnClose is an optional callback that, if non-nil, will be called whenever
 	// a connection created from the dialer is closed.
-	OnClose func(c net.Conn, err error)
+	OnClose func(ctx context.Context, c net.Conn, err error)
 }
 
 func (c *DialerConfig) validate() {
 	if c.OnDial == nil {
-		c.OnDial = func(string, string, net.Conn, error) {}
+		c.OnDial = func(context.Context, string, string, net.Conn, error) {}
 	}
 
 	if c.OnRead == nil {
-		c.OnRead = func(int, error) {}
+		c.OnRead = func(context.Context, int, error) {}
 	}
 
 	if c.OnWrite == nil {
-		c.OnWrite = func(int, error) {}
+		c.OnWrite = func(context.Context, int, error) {}
 	}
 
 	if c.OnClose == nil {
-		c.OnClose = func(net.Conn, error) {}
+		c.OnClose = func(context.Context, net.Conn, error) {}
 	}
 }
 

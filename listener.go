@@ -1,22 +1,26 @@
 package conntrack
 
 import (
+	"context"
 	"net"
 )
 
 // Listener is a [net.Listener] that tracks accepted connections.
 type Listener struct {
 	net.Listener
+
+	ctx      context.Context
 	tracker  *Tracker
-	onAccept func(net.Conn, error)
+	onAccept func(context.Context, net.Conn, error)
 	config   connConfig
 }
 
-func newListener(ln net.Listener, t *Tracker, c ListenerConfig) *Listener {
+func newListener(ctx context.Context, ln net.Listener, t *Tracker, c ListenerConfig) *Listener {
 	c.validate()
 	return &Listener{
 		Listener: ln,
 		tracker:  t,
+		ctx:      ctx,
 		onAccept: c.OnAccept,
 		config:   c.connConfig(),
 	}
@@ -25,12 +29,12 @@ func newListener(ln net.Listener, t *Tracker, c ListenerConfig) *Listener {
 // Accept decorates the net.Listener method for tracking purposes.
 func (ln *Listener) Accept() (conn net.Conn, err error) {
 	defer func() {
-		ln.onAccept(conn, err)
+		ln.onAccept(ln.ctx, conn, err)
 	}()
 
 	conn, err = ln.Listener.Accept()
 	if err == nil && conn != nil {
-		conn = ln.tracker.newConn(conn, ln.config, "server")
+		conn = ln.tracker.newConn(ln.ctx, conn, ln.config, "server")
 	}
 
 	return conn, err
@@ -44,38 +48,38 @@ type ListenerConfig struct {
 
 	// OnAccept is an optional callback that, if non-nil, will be called at the
 	// end of every accept operation made by the listener.
-	OnAccept func(c net.Conn, err error)
+	OnAccept func(ctx context.Context, c net.Conn, err error)
 
 	// OnRead is an optional callback that, if non-nil, will be called at the
 	// end of every read operation made on any connection created from the
 	// listener.
-	OnRead func(n int, err error)
+	OnRead func(ctx context.Context, n int, err error)
 
 	// OnWrite is an optional callback that, if non-nil, will be called at the
 	// end of every write operation made on any connection created from the
 	// listener.
-	OnWrite func(n int, err error)
+	OnWrite func(ctx context.Context, n int, err error)
 
 	// OnClose is an optional callback that, if non-nil, will be called whenever
 	// a connection created from the listener is closed.
-	OnClose func(c net.Conn, err error)
+	OnClose func(ctx context.Context, c net.Conn, err error)
 }
 
 func (c *ListenerConfig) validate() {
 	if c.OnAccept == nil {
-		c.OnAccept = func(net.Conn, error) {}
+		c.OnAccept = func(context.Context, net.Conn, error) {}
 	}
 
 	if c.OnRead == nil {
-		c.OnRead = func(int, error) {}
+		c.OnRead = func(context.Context, int, error) {}
 	}
 
 	if c.OnWrite == nil {
-		c.OnWrite = func(int, error) {}
+		c.OnWrite = func(context.Context, int, error) {}
 	}
 
 	if c.OnClose == nil {
-		c.OnClose = func(net.Conn, error) {}
+		c.OnClose = func(context.Context, net.Conn, error) {}
 	}
 }
 

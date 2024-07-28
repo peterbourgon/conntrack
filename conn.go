@@ -1,6 +1,7 @@
 package conntrack
 
 import (
+	"context"
 	"net"
 	"sync/atomic"
 	"time"
@@ -10,6 +11,7 @@ import (
 type Conn struct {
 	net.Conn
 
+	ctx          context.Context
 	tracker      *Tracker
 	config       connConfig
 	clientServer string
@@ -17,9 +19,11 @@ type Conn struct {
 	rd, wr       uint64
 }
 
-func newConn(conn net.Conn, t *Tracker, config connConfig, clientServer string) *Conn {
+func newConn(ctx context.Context, conn net.Conn, t *Tracker, config connConfig, clientServer string) *Conn {
 	return &Conn{
-		Conn:         conn,
+		Conn: conn,
+
+		ctx:          ctx,
 		tracker:      t,
 		config:       config,
 		clientServer: clientServer,
@@ -31,7 +35,7 @@ func newConn(conn net.Conn, t *Tracker, config connConfig, clientServer string) 
 func (c *Conn) Read(b []byte) (n int, err error) {
 	defer func() {
 		atomic.AddUint64(&c.rd, uint64(n))
-		c.config.OnRead(n, err)
+		c.config.OnRead(c.ctx, n, err)
 	}()
 
 	return c.Conn.Read(b)
@@ -41,7 +45,7 @@ func (c *Conn) Read(b []byte) (n int, err error) {
 func (c *Conn) Write(b []byte) (n int, err error) {
 	defer func() {
 		atomic.AddUint64(&c.wr, uint64(n))
-		c.config.OnWrite(n, err)
+		c.config.OnWrite(c.ctx, n, err)
 	}()
 
 	return c.Conn.Write(b)
@@ -51,7 +55,7 @@ func (c *Conn) Write(b []byte) (n int, err error) {
 func (c *Conn) Close() (err error) {
 	defer func() {
 		c.tracker.closeConn(c, err)
-		c.config.OnClose(c, err)
+		c.config.OnClose(c.ctx, c, err)
 	}()
 
 	return c.Conn.Close()
@@ -59,9 +63,9 @@ func (c *Conn) Close() (err error) {
 
 type connConfig struct {
 	Category string
-	OnRead   func(int, error)
-	OnWrite  func(int, error)
-	OnClose  func(net.Conn, error)
+	OnRead   func(context.Context, int, error)
+	OnWrite  func(context.Context, int, error)
+	OnClose  func(context.Context, net.Conn, error)
 }
 
 //

@@ -1,6 +1,7 @@
 package conntrack
 
 import (
+	"context"
 	"net"
 	"sort"
 	"sync"
@@ -29,8 +30,8 @@ func NewTracker() *Tracker {
 
 // NewListener decorates the given net.Listener so that the connections it
 // accepts are tracked by the tracker.
-func (t *Tracker) NewListener(ln net.Listener, c ListenerConfig) *Listener {
-	return newListener(ln, t, c)
+func (t *Tracker) NewListener(ctx context.Context, ln net.Listener, c ListenerConfig) *Listener {
+	return newListener(ctx, ln, t, c)
 }
 
 // NewDialer decorates the net.Dialer so that the connections it creates are
@@ -76,11 +77,11 @@ func (t *Tracker) Connections() []ConnInfo {
 	return infos
 }
 
-func (t *Tracker) newConn(conn net.Conn, config connConfig, clientServer string) *Conn {
+func (t *Tracker) newConn(ctx context.Context, conn net.Conn, config connConfig, clientServer string) *Conn {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 
-	c := newConn(conn, t, config, clientServer)
+	c := newConn(ctx, conn, t, config, clientServer)
 	t.conns[c] = struct{}{}
 	return c
 }
