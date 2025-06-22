@@ -291,7 +291,6 @@ func BenchmarkTrackingOverhead(b *testing.B) {
 					cc.Write(packet)
 				}
 			})
-
 		})
 	}
 }
