@@ -23,7 +23,7 @@ func TestDialer(t *testing.T) {
 	events := make(chan string, 100)
 	trackingDialer := tracker.NewDialer(&net.Dialer{}, conntrack.DialerConfig{
 		OnDial: func(ctx context.Context, netw, addr string, c net.Conn, err error) {
-			incrContextCounter(ctx)
+			incCounter(ctx)
 			events <- fmt.Sprintf("OnDial %s %s (%s) -> %v", netw, addr, conntrack.SafeRemoteAddr(c), err)
 		},
 		OnClose: func(_ context.Context, c net.Conn, err error) {
@@ -44,7 +44,7 @@ func TestDialer(t *testing.T) {
 
 	serverAddr := server.Listener.Addr().String()
 
-	ctx, c := withContextCounter(context.Background())
+	ctx, c := withCounter(context.Background())
 
 	req1, err := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
 	if err != nil {
@@ -114,13 +114,13 @@ func TestListener(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, c := withContextCounter(context.Background())
+	ctx, c := withCounter(context.Background())
 
 	tracker := conntrack.NewTracker()
 	events := make(chan string, 100)
 	trackingListener := tracker.NewListener(ctx, baseListener, conntrack.ListenerConfig{
 		OnAccept: func(ctx context.Context, c net.Conn, err error) {
-			incrContextCounter(ctx)
+			incCounter(ctx)
 			events <- fmt.Sprintf("OnAccept %s %s -> %v", conntrack.SafeLocalAddr(c), conntrack.SafeRemoteAddr(c), err)
 		},
 		OnClose: func(_ context.Context, c net.Conn, err error) {
@@ -205,15 +205,6 @@ func TestListener(t *testing.T) {
 func BenchmarkTrackingOverhead(b *testing.B) {
 	ctx := context.Background()
 
-	drain := func(ln net.Listener) error {
-		c, err := ln.Accept()
-		if err != nil {
-			return err
-		}
-		_, err = io.Copy(io.Discard, c)
-		return err
-	}
-
 	for _, tc := range []struct {
 		name string
 		size int64
@@ -225,11 +216,11 @@ func BenchmarkTrackingOverhead(b *testing.B) {
 		b.Run(tc.name, func(b *testing.B) {
 			packet := bytes.Repeat([]byte{'a'}, int(tc.size))
 
-			b.Run("nothing", func(b *testing.B) {
+			b.Run("no tracker", func(b *testing.B) {
 				np := newNetpipe()
 				ln := net.Listener(np)
 				errc := make(chan error, 1)
-				go func() { errc <- drain(ln) }()
+				go func() { errc <- drainListener(ln) }()
 				b.Cleanup(func() { np.Close(); <-errc })
 				dl := np
 				cc, _ := dl.DialContext(ctx, "", "")
@@ -241,12 +232,12 @@ func BenchmarkTrackingOverhead(b *testing.B) {
 				}
 			})
 
-			b.Run("listener", func(b *testing.B) {
+			b.Run("Listen tracker", func(b *testing.B) {
 				np := newNetpipe()
 				tr := conntrack.NewTracker()
 				ln := tr.NewListener(ctx, net.Listener(np), conntrack.ListenerConfig{})
 				errc := make(chan error, 1)
-				go func() { errc <- drain(ln) }()
+				go func() { errc <- drainListener(ln) }()
 				b.Cleanup(func() { np.Close(); <-errc })
 				dl := np
 				cc, _ := dl.DialContext(ctx, "", "")
@@ -258,12 +249,12 @@ func BenchmarkTrackingOverhead(b *testing.B) {
 				}
 			})
 
-			b.Run("dialer", func(b *testing.B) {
+			b.Run("Dial tracker", func(b *testing.B) {
 				np := newNetpipe()
 				tr := conntrack.NewTracker()
 				ln := net.Listener(np)
 				errc := make(chan error, 1)
-				go func() { errc <- drain(ln) }()
+				go func() { errc <- drainListener(ln) }()
 				b.Cleanup(func() { np.Close(); <-errc })
 				dl := tr.NewDialContextFunc(np.DialContext, conntrack.DialerConfig{})
 				cc, _ := dl.DialContext(ctx, "", "")
@@ -275,12 +266,12 @@ func BenchmarkTrackingOverhead(b *testing.B) {
 				}
 			})
 
-			b.Run("both", func(b *testing.B) {
+			b.Run("both trackers", func(b *testing.B) {
 				np := newNetpipe()
 				tr := conntrack.NewTracker()
 				ln := tr.NewListener(ctx, net.Listener(np), conntrack.ListenerConfig{})
 				errc := make(chan error, 1)
-				go func() { errc <- drain(ln) }()
+				go func() { errc <- drainListener(ln) }()
 				b.Cleanup(func() { np.Close(); <-errc })
 				dl := tr.NewDialContextFunc(np.DialContext, conntrack.DialerConfig{})
 				cc, _ := dl.DialContext(ctx, "", "")
@@ -298,6 +289,15 @@ func BenchmarkTrackingOverhead(b *testing.B) {
 //
 //
 //
+
+func drainListener(ln net.Listener) error {
+	c, err := ln.Accept()
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(io.Discard, c)
+	return err
+}
 
 func recvTimeout[T any](tb testing.TB, c <-chan T, timeout time.Duration) T {
 	tb.Helper()
@@ -353,15 +353,15 @@ func (np *netpipe) DialContext(context.Context, string, string) (net.Conn, error
 //
 //
 
-type contextCounterKey struct{}
+type counterKey struct{}
 
-func withContextCounter(ctx context.Context) (context.Context, *atomic.Uint64) {
+func withCounter(ctx context.Context) (context.Context, *atomic.Uint64) {
 	var c atomic.Uint64
-	return context.WithValue(ctx, contextCounterKey{}, &c), &c
+	return context.WithValue(ctx, counterKey{}, &c), &c
 }
 
-func incrContextCounter(ctx context.Context) {
-	if c, ok := ctx.Value(contextCounterKey{}).(*atomic.Uint64); ok {
+func incCounter(ctx context.Context) {
+	if c, ok := ctx.Value(counterKey{}).(*atomic.Uint64); ok {
 		c.Add(1)
 	}
 }
