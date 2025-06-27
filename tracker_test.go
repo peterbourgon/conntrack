@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,10 +22,11 @@ func TestDialer(t *testing.T) {
 	tracker := conntrack.NewTracker()
 	events := make(chan string, 100)
 	trackingDialer := tracker.NewDialer(&net.Dialer{}, conntrack.DialerConfig{
-		OnDial: func(netw, addr string, c net.Conn, err error) {
+		OnDial: func(ctx context.Context, netw, addr string, c net.Conn, err error) {
+			incCounter(ctx)
 			events <- fmt.Sprintf("OnDial %s %s (%s) -> %v", netw, addr, conntrack.SafeRemoteAddr(c), err)
 		},
-		OnClose: func(c net.Conn, err error) {
+		OnClose: func(_ context.Context, c net.Conn, err error) {
 			events <- fmt.Sprintf("OnClose (%s) -> %v", conntrack.SafeRemoteAddr(c), err)
 		},
 	})
@@ -42,7 +44,9 @@ func TestDialer(t *testing.T) {
 
 	serverAddr := server.Listener.Addr().String()
 
-	req1, err := http.NewRequest("GET", server.URL, nil)
+	ctx, c := withCounter(context.Background())
+
+	req1, err := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,6 +54,10 @@ func TestDialer(t *testing.T) {
 	res1, err := client.Do(req1)
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	if want, have := uint64(1), c.Load(); want != have {
+		t.Fatalf("context counter: want %d, have %d", want, have)
 	}
 
 	req2, err := http.NewRequest("GET", server.URL, nil)
@@ -60,6 +68,11 @@ func TestDialer(t *testing.T) {
 	res2, err := client.Do(req2)
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	// req2 goes to the same server, so there isn't a new OnDial.
+	if want, have := uint64(1), c.Load(); want != have {
+		t.Fatalf("context counter: want %d, have %d", want, have)
 	}
 
 	if want, have := fmt.Sprintf("OnDial tcp %[1]s (%[1]s) -> <nil>", serverAddr), recvTimeout(t, events, time.Second); want != have {
@@ -101,13 +114,16 @@ func TestListener(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	ctx, c := withCounter(context.Background())
+
 	tracker := conntrack.NewTracker()
 	events := make(chan string, 100)
-	trackingListener := tracker.NewListener(baseListener, conntrack.ListenerConfig{
-		OnAccept: func(c net.Conn, err error) {
+	trackingListener := tracker.NewListener(ctx, baseListener, conntrack.ListenerConfig{
+		OnAccept: func(ctx context.Context, c net.Conn, err error) {
+			incCounter(ctx)
 			events <- fmt.Sprintf("OnAccept %s %s -> %v", conntrack.SafeLocalAddr(c), conntrack.SafeRemoteAddr(c), err)
 		},
-		OnClose: func(c net.Conn, err error) {
+		OnClose: func(_ context.Context, c net.Conn, err error) {
 			events <- fmt.Sprintf("OnClose %s %s -> %v", conntrack.SafeLocalAddr(c), conntrack.SafeRemoteAddr(c), err)
 		},
 	})
@@ -150,11 +166,17 @@ func TestListener(t *testing.T) {
 	if want, have := fmt.Sprintf("OnAccept %s %s -> <nil>", listenerAddr, c1.LocalAddr()), recvTimeout(t, events, time.Second); want != have {
 		t.Errorf("event: want %q, have %q", want, have)
 	}
+
 	if want, have := fmt.Sprintf("OnAccept %s %s -> <nil>", listenerAddr, c2.LocalAddr()), recvTimeout(t, events, time.Second); want != have {
 		t.Errorf("event: want %q, have %q", want, have)
 	}
+
 	if want, have := 2, len(tracker.Connections()); want != have {
 		t.Errorf("tracker.Connections: want %d, have %d", want, have)
+	}
+
+	if want, have := uint64(2), c.Load(); want != have {
+		t.Fatalf("context counter: want %d, have %d", want, have)
 	}
 
 	if err := c2.Close(); err != nil {
@@ -183,28 +205,22 @@ func TestListener(t *testing.T) {
 func BenchmarkTrackingOverhead(b *testing.B) {
 	ctx := context.Background()
 
-	drain := func(ln net.Listener) error {
-		c, err := ln.Accept()
-		if err != nil {
-			return err
-		}
-		_, err = io.Copy(io.Discard, c)
-		return err
-	}
-
-	for _, sz := range []int64{
-		1 * 1024,
-		100 * 1024,
-		1000 * 1024,
+	for _, tc := range []struct {
+		name string
+		size int64
+	}{
+		{"1KB", 1 * 1024},
+		{"100KB", 100 * 1024},
+		{"1MB", 1000 * 1024},
 	} {
-		b.Run(fmt.Sprintf("%dB", sz), func(b *testing.B) {
-			packet := bytes.Repeat([]byte{'a'}, int(sz))
+		b.Run(tc.name, func(b *testing.B) {
+			packet := bytes.Repeat([]byte{'a'}, int(tc.size))
 
-			b.Run("nothing", func(b *testing.B) {
+			b.Run("no tracker", func(b *testing.B) {
 				np := newNetpipe()
 				ln := net.Listener(np)
 				errc := make(chan error, 1)
-				go func() { errc <- drain(ln) }()
+				go func() { errc <- drainListener(ln) }()
 				b.Cleanup(func() { np.Close(); <-errc })
 				dl := np
 				cc, _ := dl.DialContext(ctx, "", "")
@@ -216,12 +232,12 @@ func BenchmarkTrackingOverhead(b *testing.B) {
 				}
 			})
 
-			b.Run("listener", func(b *testing.B) {
+			b.Run("Listen tracker", func(b *testing.B) {
 				np := newNetpipe()
 				tr := conntrack.NewTracker()
-				ln := tr.NewListener(net.Listener(np), conntrack.ListenerConfig{})
+				ln := tr.NewListener(ctx, net.Listener(np), conntrack.ListenerConfig{})
 				errc := make(chan error, 1)
-				go func() { errc <- drain(ln) }()
+				go func() { errc <- drainListener(ln) }()
 				b.Cleanup(func() { np.Close(); <-errc })
 				dl := np
 				cc, _ := dl.DialContext(ctx, "", "")
@@ -233,12 +249,12 @@ func BenchmarkTrackingOverhead(b *testing.B) {
 				}
 			})
 
-			b.Run("dialer", func(b *testing.B) {
+			b.Run("Dial tracker", func(b *testing.B) {
 				np := newNetpipe()
 				tr := conntrack.NewTracker()
 				ln := net.Listener(np)
 				errc := make(chan error, 1)
-				go func() { errc <- drain(ln) }()
+				go func() { errc <- drainListener(ln) }()
 				b.Cleanup(func() { np.Close(); <-errc })
 				dl := tr.NewDialContextFunc(np.DialContext, conntrack.DialerConfig{})
 				cc, _ := dl.DialContext(ctx, "", "")
@@ -250,12 +266,12 @@ func BenchmarkTrackingOverhead(b *testing.B) {
 				}
 			})
 
-			b.Run("both", func(b *testing.B) {
+			b.Run("both trackers", func(b *testing.B) {
 				np := newNetpipe()
 				tr := conntrack.NewTracker()
-				ln := tr.NewListener(net.Listener(np), conntrack.ListenerConfig{})
+				ln := tr.NewListener(ctx, net.Listener(np), conntrack.ListenerConfig{})
 				errc := make(chan error, 1)
-				go func() { errc <- drain(ln) }()
+				go func() { errc <- drainListener(ln) }()
 				b.Cleanup(func() { np.Close(); <-errc })
 				dl := tr.NewDialContextFunc(np.DialContext, conntrack.DialerConfig{})
 				cc, _ := dl.DialContext(ctx, "", "")
@@ -266,7 +282,6 @@ func BenchmarkTrackingOverhead(b *testing.B) {
 					cc.Write(packet)
 				}
 			})
-
 		})
 	}
 }
@@ -274,6 +289,15 @@ func BenchmarkTrackingOverhead(b *testing.B) {
 //
 //
 //
+
+func drainListener(ln net.Listener) error {
+	c, err := ln.Accept()
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(io.Discard, c)
+	return err
+}
 
 func recvTimeout[T any](tb testing.TB, c <-chan T, timeout time.Duration) T {
 	tb.Helper()
@@ -323,4 +347,21 @@ func (np *netpipe) Addr() net.Addr {
 
 func (np *netpipe) DialContext(context.Context, string, string) (net.Conn, error) {
 	return np.client, nil
+}
+
+//
+//
+//
+
+type counterKey struct{}
+
+func withCounter(ctx context.Context) (context.Context, *atomic.Uint64) {
+	var c atomic.Uint64
+	return context.WithValue(ctx, counterKey{}, &c), &c
+}
+
+func incCounter(ctx context.Context) {
+	if c, ok := ctx.Value(counterKey{}).(*atomic.Uint64); ok {
+		c.Add(1)
+	}
 }
